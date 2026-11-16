@@ -137,7 +137,12 @@ main.py           入口（单进程 workers=1）
 
 ```bash
 python tests/test_api.py     # 无 LLM：校验/轮询/zip/sync 超时/迁移/路径安全
-python data/e2e_tasks.py     # 真实模型 e2e（会生成 sample.pptx；需可用网关配额）
+
+python data/e2e_tasks.py --gen   # 只生成 data/test_docs/sample.pptx
+python main.py                   # e2e 需要服务已在 8000 端口运行
+python data/e2e_tasks.py         # 真实模型 e2e（需可用网关配额；跑完检查任务结果）
 ```
+
+> e2e 会真实调用网关，单任务通常 2–5 分钟。默认模型配额不足时会 403，可临时把 `settings.yaml` 的 `model` 改成可用模型，跑完改回。
 
 进阶：任务接入、提示词规则、沙箱 Office skill 用法、e2e 与故障排查，见 **[docs/任务改造指导手册.md](docs/任务改造指导手册.md)**。
