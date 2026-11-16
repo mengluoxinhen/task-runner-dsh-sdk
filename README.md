@@ -16,7 +16,7 @@
 ```bash
 pip install -r requirements.txt
 cp .env.example .env        # 填入 GATEWAY_API_KEY / GATEWAY_BASE_URL
-python main.py              # http://localhost:8000  （/docs 可看 OpenAPI）
+python main.py              # http://localhost:11443  （/docs 可看 OpenAPI）
 ```
 
 Windows 提示：`data/` 目录需要当前用户完全控制权限，否则 dsh 沙箱 ACL 初始化失败：
@@ -29,29 +29,29 @@ icacls data /grant %USERNAME%:(OI)(CI)F
 
 ```bash
 # 任务类型元数据（accept / 文件数量 / output.kind / delivery）
-curl http://localhost:8000/api/task-types
+curl http://localhost:11443/api/task-types
 
 # 提交：任务类型在路径里
-curl -F "files=@demo.pptx" http://localhost:8000/api/tasks/ppt_extract
+curl -F "files=@demo.pptx" http://localhost:11443/api/tasks/ppt_extract
 #   sync 任务：阻塞到完成，200 直接返回 result JSON（响应头 X-Task-Id）
 #   超时/排队过长：202 + task_id，任务继续跑，改用轮询
 
-curl -F "files=@a.docx" -F "files=@b.pdf" http://localhost:8000/api/tasks/doc_to_markdown
+curl -F "files=@a.docx" -F "files=@b.pdf" http://localhost:11443/api/tasks/doc_to_markdown
 #   async 任务：202 {task_id, status_url, result_url}
 
 # 轮询：completed 且是 JSON 任务时，response.result.data 就是结果本体
-curl http://localhost:8000/api/tasks/{task_id}
+curl http://localhost:11443/api/tasks/{task_id}
 
 # 显式取结果：JSON 任务返回 JSON；文件任务单文件直返、多文件打包 zip
-curl http://localhost:8000/api/tasks/{task_id}/result
-curl -OJ http://localhost:8000/api/tasks/{task_id}/result?download=1
+curl http://localhost:11443/api/tasks/{task_id}/result
+curl -OJ http://localhost:11443/api/tasks/{task_id}/result?download=1
 
 # 任务列表（可过滤）与 workspace 文件（含 output/ 子目录）
-curl "http://localhost:8000/api/tasks?task_type=ppt_extract&status=completed"
-curl -OJ http://localhost:8000/api/tasks/{task_id}/files/output/a.md
+curl "http://localhost:11443/api/tasks?task_type=ppt_extract&status=completed"
+curl -OJ http://localhost:11443/api/tasks/{task_id}/files/output/a.md
 
 # 健康检查
-curl http://localhost:8000/health
+curl http://localhost:11443/health
 ```
 
 状态机：`pending → running → completed | failed`。
@@ -141,7 +141,7 @@ main.py           入口（单进程 workers=1）
 python tests/test_api.py     # 无 LLM：校验/轮询/zip/sync 超时/迁移/路径安全
 
 python data/e2e_tasks.py --gen   # 只生成 data/test_docs/sample.pptx
-python main.py                   # e2e 需要服务已在 8000 端口运行
+python main.py                   # e2e 需要服务已在 11443 端口运行
 python data/e2e_tasks.py         # 真实模型 e2e（需可用网关配额；跑完检查任务结果）
 ```
 
