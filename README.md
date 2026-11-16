@@ -1,72 +1,143 @@
-# doc_audit_web — 文档校核 Web 服务（dsh harness + 任意 OpenAI 兼容网关）
+# task-runner — 配置驱动的通用任务处理器（dsh harness + OpenAI 兼容网关）
 
-上传 docx/pdf，Agent 在隔离沙箱内自主完成校核：`single` 模式做文档自检（只报告不修改），`multi` 模式做跨文档矛盾比对并可自动修正（修改前先读、改后必验）。每个任务独立 workspace + 独立 session，服务单线程串行消费队列。
+上传任务允许的文件（1 个或多个）→ Agent 在隔离 workspace 内按预设提示词执行 → 结果统一为 **JSON** 或 **文件产物**。任务类型、可接收格式、提示词、输出形态、交付方式全部在配置里声明，新增任务不改 Python 代码。
+
+内置两个示例：
+
+| 任务类型 | 输入 | 输出 | 交付 |
+|---|---|---|---|
+| `ppt_extract` | `.pptx`（1 个） | 结构化 JSON（每页标题/正文/表格/图表/备注/图片） | `sync`：POST 直接返回结果 |
+| `doc_to_markdown` | `.docx` / `.pdf` / `.pptx`（1–5 个） | 每个输入一个 `.md` | `async`：轮询，完成后取 zip |
+
+> 旧的 `single` / `multi` 文档校核接口已移除；`POST /api/tasks` 现在返回 `410 Gone`。
 
 ## 快速开始
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env        # 填入你的 GATEWAY_API_KEY / GATEWAY_BASE_URL
-python main.py              # http://localhost:8000
+cp .env.example .env        # 填入 GATEWAY_API_KEY / GATEWAY_BASE_URL
+python main.py              # http://localhost:8000  （/docs 可看 OpenAPI）
 ```
 
-> Windows 提示：`data/` 目录需要当前用户完全控制权限，否则 dsh 沙箱 ACL 初始化失败。若报错执行：
-> `icacls data /grant %USERNAME%:(OI)(CI)F`
+Windows 提示：`data/` 目录需要当前用户完全控制权限，否则 dsh 沙箱 ACL 初始化失败：
+
+```powershell
+icacls data /grant %USERNAME%:(OI)(CI)F
+```
 
 ## API
 
 ```bash
-# 提交任务（single：1 个文件；multi：2–10 个文件）
-curl -F "mode=single" -F "files=@a.docx" http://localhost:8000/api/tasks
-curl -F "mode=multi"  -F "files=@a.docx" -F "files=@b.pdf" http://localhost:8000/api/tasks
+# 任务类型元数据（accept / 文件数量 / output.kind / delivery）
+curl http://localhost:8000/api/task-types
 
-# 查询
-curl http://localhost:8000/api/tasks/{task_id}            # 状态 pending/running/completed/failed
-curl http://localhost:8000/api/tasks/{task_id}/report     # 下载 JSON 报告
-curl http://localhost:8000/api/tasks/{task_id}/files/{文件名}  # 下载 Agent 修正后的文档
+# 提交：任务类型在路径里
+curl -F "files=@demo.pptx" http://localhost:8000/api/tasks/ppt_extract
+#   sync 任务：阻塞到完成，200 直接返回 result JSON（响应头 X-Task-Id）
+#   超时/排队过长：202 + task_id，任务继续跑，改用轮询
+
+curl -F "files=@a.docx" -F "files=@b.pdf" http://localhost:8000/api/tasks/doc_to_markdown
+#   async 任务：202 {task_id, status_url, result_url}
+
+# 轮询：completed 且是 JSON 任务时，response.result.data 就是结果本体
+curl http://localhost:8000/api/tasks/{task_id}
+
+# 显式取结果：JSON 任务返回 JSON；文件任务单文件直返、多文件打包 zip
+curl http://localhost:8000/api/tasks/{task_id}/result
+curl -OJ http://localhost:8000/api/tasks/{task_id}/result?download=1
+
+# 任务列表（可过滤）与 workspace 文件（含 output/ 子目录）
+curl "http://localhost:8000/api/tasks?task_type=ppt_extract&status=completed"
+curl -OJ http://localhost:8000/api/tasks/{task_id}/files/output/a.md
+
+# 健康检查
+curl http://localhost:8000/health
 ```
 
-## 配置：全部参数集中在 `config/settings.yaml`
+状态机：`pending → running → completed | failed`。
 
-代码中没有硬编码参数；改行为不改代码。
+## 结果合同
 
-| 分组 | 关键项 | 说明 |
-|------|--------|------|
-| 网关/SDK | `base_url` `model` `provider` `api_style` `profile` `reasoning_effort` `max_tokens` `context_window` `supports_developer_role` `initialize_timeout_seconds` | dsh SDK 构建 harness 的全部参数 |
-| 密钥 | `api_key_env` + `${GATEWAY_API_KEY}` | 密钥只存在于环境变量 / `.env`（已 gitignore），任何配置文件不含明文 |
-| server | `host` `port` | 监听地址 |
-| limits | `allowed_exts` `multi_max_files` | 上传约束 |
-| paths | `workspace_root` `dsh_home` `db_file` 等 | 全部相对路径自动解析到项目根 |
-| prompt_vars | `min_confidence` `final_output_constraint` | 自动修正门槛、输出合同 |
-| limits | `report_filename` | 报告文件名（相对任务 workspace，勿写成路径） |
+**JSON 任务**：Agent 把最终 JSON 写入任务 workspace 的 `result.json`，服务端校验后原子写回（`result.json.tmp` → `os.replace`）。`result.json` 是唯一权威来源：
 
-**换模型**：只改 `settings.yaml` 的 `model` 一项——`doc_audit/config.py` 会把它连同 base_url/协议/上下文窗口一起渲染进 `config/_generated/gateway.patch.yml`（该目录已 gitignore），作为 dsh profile patch 注入 `llm-pi-ai` 自定义 provider 路由。第三方网关不走 SDK 内置的 Anthropic 协议路由，这一层路由是必需的。
+- 轮询 `GET /api/tasks/{id}` 到 `completed` 时，服务端**现读该文件**并放入 `result.data`，前端拿到即可用；
+- `GET /api/tasks/{id}/result` 可重复取数，`?download=1` 转附件；
+- 文件被外部删除时状态仍为 completed，但 `result.available=false`，`/result` 返回 404。
 
-**改任务内容**：`config/prompts.yaml` 是任务逻辑的唯一入口（占位符 `<<workspace>>` `<<file_types>>` `<<min_confidence>>` `<<constraint>>` 自动替换，JSON 示例无需转义）。按你的工作流新增 skill：把 `<name>/SKILL.md` 放进任务 workspace 的 `.dsh/skills/`（运行时原生扫描该目录），prompt 里引用 skill 名即可。
+**文件任务**：产物写 `workspace/output/`（目录可配置），校验数量/扩展名/非空/总大小；无产物即 `failed`。`result.json` 只是摘要，缺失时服务端用产物清单合成。`/result`：单文件直返，多文件现场打 zip（临时文件自动清理）。
+
+失败信息在任务的 `error` 字段；JSON 任务解析失败时原始回复保存在 `_artifacts/agent_raw.txt`。
+
+## 新增一个任务（零代码）
+
+1. 在 `config/prompts/` 新建提示词，例如 `summarize.md`；
+2. 在 `config/tasks.yaml` 加一个条目：
+
+```yaml
+tasks:
+  summarize:
+    name: 文档摘要
+    description: 对上传文档生成结构化摘要
+    accept: [".docx", ".pdf"]
+    min_files: 1
+    max_files: 3
+    prompt: summarize.md
+    delivery: async            # 或 sync
+    output:
+      kind: json               # 或 files（配合 output.dir / allowed_exts）
+      file: result.json
+```
+
+3. 重启服务。`GET /api/task-types` 会出现新类型，`POST /api/tasks/summarize` 即可调用。
+
+提示词可用占位符：`<<workspace>>`、`<<task_name>>`、`<<file_types>>`、`<<input_files>>`、`<<output_dir>>`、`<<constraint>>`（全局输出合同，见 `settings.yaml.prompt_vars`）。
+
+## 配置
+
+| 文件 | 内容 | 改动频率 |
+|---|---|---|
+| `config/settings.yaml` | 网关/SDK、server、agent 超时、上传大小、paths、输出合同 | 高 |
+| `config/tasks.yaml` | 任务注册表：格式/数量/提示词/输出/交付方式 | **做新任务就改它** |
+| `config/prompts/*.md` | 每个任务的提示词 | **做新任务就改它** |
+| `.env`（gitignore） | `GATEWAY_API_KEY`、`GATEWAY_BASE_URL` | 换密钥时 |
+| `config/gateway.patch.yml` | provider 路由模板（占位符自动填充） | 极低 |
+
+**换模型**：只改 `settings.yaml` 的 `model`，`task_engine/config.py` 会连同 base_url/协议/上下文窗口重新渲染 `config/_generated/gateway.patch.yml`。第三方网关保持 `supports_developer_role: false`。
 
 ## 目录结构
 
 ```
-config/           settings.yaml · gateway.patch.yml(模板) · prompts.yaml
-doc_audit/        config.py(加载/渲染) · llm.py(harness 构建) · runner.py(one-shot 执行)
-web/              app.py(FastAPI) · worker.py(串行队列) · db.py(sqlite)
-data/             运行时产物（gitignore）；test_docs/ 为示例文档
-main.py           入口
+config/           settings.yaml · tasks.yaml · prompts/*.md · gateway.patch.yml(模板)
+task_engine/      config.py(加载/渲染) · tasks.py(注册表) · llm.py(harness) · runner.py(执行/产物校验)
+web/              app.py(FastAPI) · worker.py(串行队列) · waiter.py(sync 等待) · db.py(sqlite)
+tests/            test_api.py（FakeRunner，无 LLM）
+data/             运行时产物（gitignore）；test_docs/ 为示例文档；e2e_tasks.py 真实 e2e 脚本
+main.py           入口（单进程 workers=1）
 ```
 
-## 报告格式
+## 执行模型
 
-```json
-{ "mode": "multi", "documents": [...], "findings": [
-    { "kind": "conflict", "severity": "high", "docs": ["a.docx","b.pdf"],
-      "locations": [...], "detail": {...}, "evidence": {...},
-      "confidence": 0.92, "suggested": {...}, "action": "auto_applied|reported" }
-  ],
-  "auto_applied": 3, "skipped": [ {"target": "b.pdf", "reason": "..."} ] }
+- 单线程串行消费队列；`sync` 任务优先出队。Worker 必须单进程运行（queue/Event 在进程内），`main.py` 已固定 `workers=1`。
+- `sync` 等待超过任务配置的 `sync_timeout_seconds`（默认 300s）或并发等待名额已满时，返回 `202`，任务继续执行，可改轮询。
+- 每个任务独立 workspace + 独立 session（`task-{id}`），长任务不会污染其他任务。
+- Agent 硬超时由 `agent_timeout_seconds` 控制（默认 900s），超时会强制关闭 harness，任务转 `failed`。
+
+## 排障
+
+| 症状 | 根因 | 处置 |
+|---|---|---|
+| 任务秒失败且错误里有“疑似网关 403 配额/路由” | 网关配额耗尽 / 路由失败 | 看网关控制台；检查 `.env` 的 key/base_url 与 `settings.yaml` 的 model/provider |
+| `result.json` 解析失败 | 输出合同未遵守 | 保留提示词末尾的 `<<constraint>>`；确认 Agent 写入了 `result.json` |
+| 文件任务 `failed` 但 Agent 说做完了 | 产物没写到 `output/` 或扩展名不符 | 检查任务 `output.dir` / `allowed_exts`，提示词里明确写到 `<<output_dir>>/` |
+| 初始化 404 / 400 developer role | 网关协议不匹配 | `api_style` 与网关实际协议核对；`supports_developer_role: false` |
+| Agent 说没权限写文件 | Windows 沙箱 ACL | `icacls data /grant %USERNAME%:(OI)(CI)F` |
+| `POST /api/tasks` 返回 410 | 旧接口已移除 | 改用 `POST /api/tasks/{task_type}` |
+
+## 测试
+
+```bash
+python tests/test_api.py     # 无 LLM：校验/轮询/zip/sync 超时/迁移/路径安全
+python data/e2e_tasks.py     # 真实模型 e2e（会生成 sample.pptx；需可用网关配额）
 ```
 
-解析失败时报告为 `{ "mode", "error", "raw_response" }`，不抛异常、任务仍计 completed。
-
-## 进阶
-
-基于本服务构建自己的任务（改 prompt / 加 mode / 挂 skill / 换模型 / 排障），见 **[docs/任务改造指导手册.md](docs/任务改造指导手册.md)**。
+进阶：任务接入、提示词规则、沙箱 Office skill 用法、e2e 与故障排查，见 **[docs/任务改造指导手册.md](docs/任务改造指导手册.md)**。

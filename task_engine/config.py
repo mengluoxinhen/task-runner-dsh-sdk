@@ -1,4 +1,4 @@
-"""配置加载：settings.yaml 是唯一参数来源。
+"""配置加载：settings.yaml 是全局参数唯一来源。
 
 职责：
 1. 注入项目根 .env（若存在）到环境变量（简易解析，不引第三方依赖）。
@@ -6,6 +6,8 @@
 3. paths.* 解析为绝对路径。
 4. 渲染 config/gateway.patch.yml 模板 → config/_generated/gateway.patch.yml，
    使网关参数（base_url/model/协议等）只在 settings.yaml 维护一份。
+
+任务类型与提示词不在这里加载：见 task_engine/tasks.py。
 """
 import os
 import re
@@ -85,7 +87,4 @@ def finalize(settings: dict) -> dict:
     """对（可能来自测试脚本的）原始 settings dict 补齐路径与渲染产物。"""
     settings = _resolve_paths(settings)
     settings["gateway_patch_file"] = str(render_gateway_patch(settings))
-    if "prompt_templates" not in settings:
-        settings["prompt_templates"] = yaml.safe_load(
-            Path(settings["paths"]["prompts_file"]).read_text("utf-8"))
     return settings

@@ -1,6 +1,7 @@
 # ══════════════════════════════════════════════════════════════
-# doc_audit_web 全量配置。代码中不应再有硬编码参数。
+# 通用任务处理器全局配置。代码中不应再有硬编码参数。
 # ${VAR} 语法：加载时展开为环境变量（可在项目根 .env 中定义）。
+# 任务类型、可接收文件、提示词、输出形态见 config/tasks.yaml。
 # ══════════════════════════════════════════════════════════════
 
 # ── dsh SDK / 网关 ─────────────────────────────────────────────
@@ -16,28 +17,34 @@ max_tokens: 49152
 context_window: 262144
 supports_developer_role: false        # 网关拒绝 developer 角色时必须 false
 initialize_timeout_seconds: 120
+request_timeout_seconds: 120          # SDK RPC 请求超时（不含 Agent 运行时长）
 
 # ── 服务 ───────────────────────────────────────────────────────
 server:
   host: 0.0.0.0
   port: 8000
+  sync_max_waiters: 8                 # 同时阻塞等待结果的 sync 请求上限，超出直接 202
 
-# ── 任务与上传约束 ─────────────────────────────────────────────
+# ── Agent 执行 ─────────────────────────────────────────────────
+agent:
+  timeout_seconds: 900                # 单任务硬超时（任务级可覆盖），超时强杀 harness
+
+# ── 上传与结果约束 ─────────────────────────────────────────────
 limits:
-  allowed_exts: [".docx", ".pdf"]
-  multi_max_files: 10                 # multi 模式上限（下限固定 2）
-  report_filename: audit_report.json  # 报告文件名（相对任务 workspace）
+  max_file_bytes: 52428800            # 单个上传文件 50MB
+  result_max_bytes: 20971520          # result.json 最大 20MB
 
 # ── 路径（相对项目根，自动解析为绝对路径）─────────────────────
 paths:
   gateway_patch_template: config/gateway.patch.yml
   gateway_patch_rendered: config/_generated/gateway.patch.yml
-  prompts_file: config/prompts.yaml
+  tasks_file: config/tasks.yaml
+  prompt_dir: config/prompts
   workspace_root: data/workspaces
   dsh_home: data/dsh-home
   db_file: data/tasks.db
+  tmp_dir: data/tmp
 
-# ── Prompt 模板与输出合同 ──────────────────────────────────────
+# ── Prompt 全局片段 ────────────────────────────────────────────
 prompt_vars:
-  min_confidence: 0.85                # multi 自动修改的置信度门槛
   final_output_constraint: "最终回复必须且只能是一个合法 JSON 对象：不要 Markdown 代码块、不要任何前后说明文字。"

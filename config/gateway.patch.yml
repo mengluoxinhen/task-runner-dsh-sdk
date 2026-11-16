@@ -1,4 +1,4 @@
-# 网关 provider 路由模板：占位符由 doc_audit/config.py 用本文件同级 settings.yaml
+# 网关 provider 路由模板：占位符由 task_engine/config.py 用本文件同级 settings.yaml
 # 的值渲染，结果写入 config/_generated/gateway.patch.yml（勿手工编辑生成件）。
 
 - id: llm-pi-ai

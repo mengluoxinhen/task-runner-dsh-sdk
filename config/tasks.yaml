@@ -1,0 +1,43 @@
+# ══════════════════════════════════════════════════════════════
+# 任务注册表：每个条目是一个可通过 POST /api/tasks/{id} 调用的任务。
+# 新增任务 = 在这里加一个条目 + 在 config/prompts/ 放一个同名模板。
+# 启动时校验，配置错误会拒绝启动并列出全部问题。
+# ══════════════════════════════════════════════════════════════
+
+defaults:
+  delivery: async                 # async：轮询；sync：POST 直接返回结果
+  agent_timeout_seconds: 900      # 单任务 Agent 硬超时，超时强杀 harness
+  sync_timeout_seconds: 300       # sync 请求最长等待；超时退化为 202，任务继续跑
+  max_file_bytes: 52428800        # 单个上传文件 50MB
+  output:
+    kind: json                    # json | files
+    file: result.json             # Agent 最终 JSON（json 任务的结果本体；files 任务的摘要）
+
+tasks:
+  ppt_extract:
+    name: PPT 内容解析
+    description: 解析 PPT 每页标题、正文、表格、图表、备注、图片信息，输出结构化 JSON
+    accept: [".pptx"]
+    min_files: 1
+    max_files: 1
+    prompt: ppt_extract.md
+    delivery: sync
+    sync_timeout_seconds: 300
+    output:
+      kind: json
+      file: result.json
+
+  doc_to_markdown:
+    name: 文档转 Markdown
+    description: 将 docx/pdf/pptx 转换为结构化 Markdown，每个输入文件产出一个 .md
+    accept: [".docx", ".pdf", ".pptx"]
+    min_files: 1
+    max_files: 5
+    prompt: doc_to_markdown.md
+    delivery: async
+    output:
+      kind: files
+      dir: output
+      allowed_exts: [".md"]
+      min_files: 1
+      max_files: 20
