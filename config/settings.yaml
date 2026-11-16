@@ -28,6 +28,11 @@ server:
 # ── Agent 执行 ─────────────────────────────────────────────────
 agent:
   timeout_seconds: 900                # 单任务硬超时（任务级可覆盖），超时强杀 harness
+  # DSH 权限预设：read-only | workspace-write | danger-full-access
+  # 打包 exe 内沙箱执行器无法启动，默认用 danger-full-access 保证可运行；
+  # 源码/受控环境想收紧时，设环境变量 DSH_PERMISSION_MODE=workspace-write 覆盖。
+  # 注意：danger-full-access 关闭文件作用域限制与审批，Agent 可读取项目内 .env。
+  permission_mode: "${DSH_PERMISSION_MODE:danger-full-access}"
 
 # ── 上传与结果约束 ─────────────────────────────────────────────
 limits:

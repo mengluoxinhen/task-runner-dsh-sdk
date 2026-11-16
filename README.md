@@ -120,7 +120,8 @@ main.py           入口（单进程 workers=1）
 - 单线程串行消费队列；`sync` 任务优先出队。Worker 必须单进程运行（queue/Event 在进程内），`main.py` 已固定 `workers=1`。
 - `sync` 等待超过任务配置的 `sync_timeout_seconds`（默认 300s）或并发等待名额已满时，返回 `202`，任务继续执行，可改轮询。
 - 每个任务独立 workspace + 独立 session（`task-{id}`），长任务不会污染其他任务。
-- Agent 硬超时由 `agent_timeout_seconds` 控制（默认 900s），超时会强制关闭 harness，任务转 `failed`。
+- Agent 硬超时由 `agent.timeout_seconds` 控制（默认 900s），超时会强制关闭 harness，任务转 `failed`。
+- 沙箱权限档位由 `agent.permission_mode`（环境变量 `DSH_PERMISSION_MODE`）控制，默认 `danger-full-access`，以兼容打包 exe 内沙箱执行器无法启动的情况。该档位会关闭文件作用域限制和审批，Agent 可读写工作区外文件并读取项目内 `.env`，仅限受控内网部署；源码/收紧环境可设 `DSH_PERMISSION_MODE=workspace-write`。
 
 ## 排障
 
@@ -130,6 +131,7 @@ main.py           入口（单进程 workers=1）
 | `result.json` 解析失败 | 输出合同未遵守 | 保留提示词末尾的 `<<constraint>>`；确认 Agent 写入了 `result.json` |
 | 文件任务 `failed` 但 Agent 说做完了 | 产物没写到 `output/` 或扩展名不符 | 检查任务 `output.dir` / `allowed_exts`，提示词里明确写到 `<<output_dir>>/` |
 | 初始化 404 / 400 developer role | 网关协议不匹配 | `api_style` 与网关实际协议核对；`supports_developer_role: false` |
+| 打包 exe 后报 sandbox runner 起不来 | PyInstaller 临时目录里沙箱执行器无法启动 | 默认已是 `danger-full-access`；确认 `agent.permission_mode` 未被改回 `workspace-write`。长期方案：改 `--onedir` 并 `--collect-all deepseek_harness_runtime` |
 | Agent 说没权限写文件 | Windows 沙箱 ACL | `icacls data /grant %USERNAME%:(OI)(CI)F` |
 | `POST /api/tasks` 返回 410 | 旧接口已移除 | 改用 `POST /api/tasks/{task_type}` |
 

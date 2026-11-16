@@ -16,6 +16,11 @@ def make_harness(settings: dict) -> DeepSeekHarness:
     if "gateway_patch_file" not in settings:
         settings = cfg.finalize(settings)
     api_key = settings.get("api_key") or os.environ.get(settings["api_key_env"], "")
+    env = {settings["api_key_env"]: api_key}
+    permission_mode = str(
+        settings.get("agent", {}).get("permission_mode") or "").strip()
+    if permission_mode:
+        env["DSH_PERMISSION_MODE"] = permission_mode
     return DeepSeekHarness(
         dsh_home=str(settings.get("dsh_home") or settings["paths"]["dsh_home"]),
         cwd=str(settings.get("workspace") or settings["paths"]["workspace_root"]),
@@ -27,5 +32,5 @@ def make_harness(settings: dict) -> DeepSeekHarness:
         initialize_timeout_seconds=settings["initialize_timeout_seconds"],
         request_timeout_seconds=settings.get("request_timeout_seconds"),
         patches=(settings["gateway_patch_file"],),
-        env={settings["api_key_env"]: api_key},
+        env=env,
     )
