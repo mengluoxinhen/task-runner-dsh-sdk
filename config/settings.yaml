@@ -8,11 +8,11 @@
 base_url: "${GATEWAY_BASE_URL}"       # OpenAI 兼容网关 chat/completions 端点
 api_key_env: GATEWAY_API_KEY          # 密钥所在环境变量名（密钥不落本文件）
 api_key: "${GATEWAY_API_KEY}"
-model: "qwen3.8-2.4t-a95b"
+model: "Qwen3.8-Flash-Next"           # 内部默认模型（无需单独测速）
 provider: qwen-gateway                # llm-pi-ai 自定义路由 id
 api_style: openai-completions         # 协议：openai-completions | anthropic-messages
 profile: sdk                          # dsh cordis profile
-reasoning_effort: high                # off | low | medium | high | max
+reasoning_effort: medium              # off | low | medium | high | max（默认 medium）
 max_tokens: 49152
 context_window: 262144
 supports_developer_role: false        # 网关拒绝 developer 角色时必须 false
