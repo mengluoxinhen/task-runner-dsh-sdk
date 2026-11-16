@@ -1,0 +1,43 @@
+# ══════════════════════════════════════════════════════════════
+# doc_audit_web 全量配置。代码中不应再有硬编码参数。
+# ${VAR} 语法：加载时展开为环境变量（可在项目根 .env 中定义）。
+# ══════════════════════════════════════════════════════════════
+
+# ── dsh SDK / 网关 ─────────────────────────────────────────────
+base_url: "${GATEWAY_BASE_URL}"       # OpenAI 兼容网关 chat/completions 端点
+api_key_env: GATEWAY_API_KEY          # 密钥所在环境变量名（密钥不落本文件）
+api_key: "${GATEWAY_API_KEY}"
+model: "qwen3.8-flash"
+provider: qwen-gateway                # llm-pi-ai 自定义路由 id
+api_style: openai-completions         # 协议：openai-completions | anthropic-messages
+profile: sdk                          # dsh cordis profile
+reasoning_effort: high                # off | low | medium | high | max
+max_tokens: 49152
+context_window: 262144
+supports_developer_role: false        # 网关拒绝 developer 角色时必须 false
+initialize_timeout_seconds: 120
+
+# ── 服务 ───────────────────────────────────────────────────────
+server:
+  host: 0.0.0.0
+  port: 8000
+
+# ── 任务与上传约束 ─────────────────────────────────────────────
+limits:
+  allowed_exts: [".docx", ".pdf"]
+  multi_max_files: 10                 # multi 模式上限（下限固定 2）
+  report_filename: audit_report.json  # 报告文件名（相对任务 workspace）
+
+# ── 路径（相对项目根，自动解析为绝对路径）─────────────────────
+paths:
+  gateway_patch_template: config/gateway.patch.yml
+  gateway_patch_rendered: config/_generated/gateway.patch.yml
+  prompts_file: config/prompts.yaml
+  workspace_root: data/workspaces
+  dsh_home: data/dsh-home
+  db_file: data/tasks.db
+
+# ── Prompt 模板与输出合同 ──────────────────────────────────────
+prompt_vars:
+  min_confidence: 0.85                # multi 自动修改的置信度门槛
+  final_output_constraint: "最终回复必须且只能是一个合法 JSON 对象：不要 Markdown 代码块、不要任何前后说明文字。"

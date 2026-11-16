@@ -1,0 +1,24 @@
+# 网关 provider 路由模板：占位符由 doc_audit/config.py 用本文件同级 settings.yaml
+# 的值渲染，结果写入 config/_generated/gateway.patch.yml（勿手工编辑生成件）。
+
+- id: llm-pi-ai
+  config:
+    providers:
+      {provider_id}:
+        displayName: Gateway ({api_style})
+        api: {api_style}
+        baseURL: {base_url}
+        apiKeyEnv: {api_key_env}
+        models:
+          - id: {model}
+            name: Gateway Model
+            contextWindow: {context_window}
+            maxTokens: {max_tokens}
+            reasoningEfforts:
+              off:
+              low: "low"
+              medium: "medium"
+              high: "high"
+              max: "max"
+            compat:
+              supportsDeveloperRole: {supports_developer_role}

@@ -1,0 +1,17 @@
+# 密钥与本地环境（切勿提交）
+.env
+
+# 渲染产物 / 缓存
+config/_generated/
+__pycache__/
+*.pyc
+
+# 运行时数据：任务 workspace、dsh 缓存、sqlite、测试输出
+data/*
+!data/test_docs/
+!data/*.py
+!data/diagnose-windows-sandbox-acl.ps1
+
+# 杂散
+*.log
+server.pid
