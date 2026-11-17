@@ -157,6 +157,7 @@ class Runner:
             input_files=", ".join(self.input_files),
             output_dir=self.spec.output.dir,
             constraint=self.settings["prompt_vars"]["final_output_constraint"],
+            **self.spec.prompt_vars,
         )
 
     # ── main ───────────────────────────────────────────────────

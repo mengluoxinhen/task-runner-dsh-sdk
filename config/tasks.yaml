@@ -27,6 +27,26 @@ tasks:
       kind: json
       file: result.json
 
+  ppt_extract_assets:
+    name: PPT 内容解析（含页面截图）
+    description: 解析 PPT 每页文字/表格/图表/备注，并导出每页截图，产出 result.json + 图片
+    accept: [".pptx"]
+    min_files: 1
+    max_files: 1
+    prompt: ppt_extract_assets.md
+    delivery: async
+    agent_timeout_seconds: 1800
+    # 改成公司电脑上实际 skill 目录名（kebab-case）；提示词里的 <<skill_name>> 会替换成它。
+    prompt_vars:
+      skill_name: ppt-extract
+    output:
+      kind: files
+      dir: output
+      allowed_exts: [".json", ".png", ".jpg", ".jpeg"]
+      min_files: 2
+      max_files: 300
+      max_total_bytes: 536870912
+
   doc_to_markdown:
     name: 文档转 Markdown
     description: 将 docx/pdf/pptx 转换为结构化 Markdown，每个输入文件产出一个 .md

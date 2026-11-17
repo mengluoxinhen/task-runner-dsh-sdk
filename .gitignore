@@ -12,6 +12,12 @@ data/*
 !data/*.py
 !data/diagnose-windows-sandbox-acl.ps1
 
+# 本地环境 / 草稿 / DSH 运行态（skills 仍纳入版本管理）
+.venv/
+_scr*/
+.dsh/*
+!.dsh/skills/
+
 # 杂散
 *.log
 server.pid

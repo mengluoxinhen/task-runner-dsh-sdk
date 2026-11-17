@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from task_engine.config import load_config  # noqa: E402
-from task_engine.runner import RunOutcome, atomic_write_json  # noqa: E402
+from task_engine.runner import RunOutcome, Runner, atomic_write_json  # noqa: E402
 from web.app import create_app  # noqa: E402
 from web.db import init_db  # noqa: E402
 
@@ -42,6 +42,8 @@ tasks:
     prompt: ppt.md
     delivery: sync
     sync_timeout_seconds: 5
+    prompt_vars:
+      skill_name: demo-skill
   doc_to_markdown:
     name: 文档转 Markdown
     accept: [".docx", ".pdf"]
@@ -132,6 +134,8 @@ def _prepare(tmp: Path):
     for name in ("ppt.md", "md.md", "slow.md", "fail.md", "small.md",
                  "concurrent.md"):
         (prompt_dir / name).write_text("fake prompt", encoding="utf-8")
+    (prompt_dir / "ppt.md").write_text(
+        "skill=<<skill_name>> workspace=<<workspace>>", encoding="utf-8")
 
     settings = load_config()
     settings["paths"]["tasks_file"] = cfg_dir / "tasks.yaml"
@@ -199,6 +203,15 @@ def test_api(tmp: Path):
             "concurrent_json"}
         assert client.get("/health").json()["status"] == "ok"
         assert client.get("/").json()["task_types"]
+
+        # 任务级提示词变量：<<skill_name>> 等自定义占位符
+        spec = app.state.tasks["ppt_extract"]
+        assert spec.prompt_vars == {"skill_name": "demo-skill"}, spec.prompt_vars
+        probe = Runner(settings, spec, tmp / "probe-ws", tmp / "probe-home",
+                       ["demo.pptx"])
+        rendered = probe.render_prompt()
+        assert "skill=demo-skill" in rendered, rendered
+        assert str((tmp / "probe-ws").resolve()) in rendered, rendered
 
         # 旧接口
         legacy = client.post("/api/tasks")

@@ -7,6 +7,7 @@
 | 任务类型 | 输入 | 输出 | 交付 |
 |---|---|---|---|
 | `ppt_extract` | `.pptx`（1 个） | 结构化 JSON（每页标题/正文/表格/图表/备注/图片） | `sync`：POST 直接返回结果 |
+| `ppt_extract_assets` | `.pptx`（1 个） | `output/result.json` + 每页截图 `output/slides/*.png` | `async`：轮询，按文件 URL 取 JSON 与图片 |
 | `doc_to_markdown` | `.docx` / `.pdf` / `.pptx`（1–5 个） | 每个输入一个 `.md` | `async`：轮询，完成后取 zip |
 
 > 旧的 `single` / `multi` 文档校核接口已移除；`POST /api/tasks` 现在返回 `410 Gone`。
@@ -35,6 +36,10 @@ curl http://localhost:11443/api/task-types
 curl -F "files=@demo.pptx" http://localhost:11443/api/tasks/ppt_extract
 #   sync 任务：阻塞到完成，200 直接返回 result JSON（响应头 X-Task-Id）
 #   超时/排队过长：202 + task_id，任务继续跑，改用轮询
+
+curl -F "files=@demo.pptx" http://localhost:11443/api/tasks/ppt_extract_assets
+#   async 任务：轮询 /api/tasks/{id}，result.files 里同时有 result.json 和 slides/*.png 的 url
+#   图片可直接按 url 取；/api/tasks/{id}/result 会打包 zip
 
 curl -F "files=@a.docx" -F "files=@b.pdf" http://localhost:11443/api/tasks/doc_to_markdown
 #   async 任务：202 {task_id, status_url, result_url}
@@ -66,6 +71,8 @@ curl http://localhost:11443/health
 
 **文件任务**：产物写 `workspace/output/`（目录可配置），校验数量/扩展名/非空/总大小；无产物即 `failed`。`result.json` 只是摘要，缺失时服务端用产物清单合成。`/result`：单文件直返，多文件现场打 zip（临时文件自动清理）。
 
+文件任务也可以把结构化 JSON 作为产物放进 `output/`（例如 `ppt_extract_assets` 的 `output/result.json`）：它会和图片一起出现在 `GET /api/tasks/{id}` 的 `result.files[].url` 里，前端按 URL 单独取 JSON 和图片；`/result` 仍返回 zip。
+
 失败信息在任务的 `error` 字段；JSON 任务解析失败时原始回复保存在 `_artifacts/agent_raw.txt`。
 
 ## 新增一个任务（零代码）
@@ -91,6 +98,8 @@ tasks:
 3. 重启服务。`GET /api/task-types` 会出现新类型，`POST /api/tasks/summarize` 即可调用。
 
 提示词可用占位符：`<<workspace>>`、`<<task_name>>`、`<<file_types>>`、`<<input_files>>`、`<<output_dir>>`、`<<constraint>>`（全局输出合同，见 `settings.yaml.prompt_vars`）。
+
+任务还可以在 `tasks.yaml` 里声明自己的占位符，例如 `ppt_extract_assets` 用 `prompt_vars.skill_name` 指定要加载的 skill，提示词里写 `<<skill_name>>` 即可。自定义变量不能覆盖上面 6 个内置占位符。
 
 ## 配置
 

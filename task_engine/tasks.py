@@ -6,15 +6,19 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 
 import yaml
 
 TASK_ID_RE = re.compile(r"^[a-z0-9_]{1,64}$")
+PROMPT_VAR_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 DELIVERY_KINDS = {"async", "sync"}
 OUTPUT_KINDS = {"json", "files"}
 RESERVED_DIR_PARTS = {"_artifacts", ".dsh", "__pycache__"}
+BUILTIN_PROMPT_VARS = {
+    "workspace", "task_name", "file_types", "input_files", "output_dir", "constraint",
+}
 
 
 class TaskConfigError(ValueError):
@@ -47,6 +51,7 @@ class TaskSpec:
     agent_timeout_seconds: float
     max_file_bytes: int
     output: OutputSpec
+    prompt_vars: dict[str, str] = field(default_factory=dict)
 
     def public_metadata(self) -> dict:
         out = {
@@ -212,6 +217,27 @@ def load_tasks(settings: dict) -> dict[str, TaskSpec]:
                 if not prompt_text.strip():
                     errors.append(f"{prefix}.prompt 文件为空: {prompt_path}")
 
+        raw_vars = conf.get("prompt_vars") or {}
+        if not isinstance(raw_vars, dict):
+            errors.append(f"{prefix}.prompt_vars 必须是映射")
+            raw_vars = {}
+        prompt_vars: dict[str, str] = {}
+        for var_name, var_value in raw_vars.items():
+            if not isinstance(var_name, str) or not PROMPT_VAR_RE.fullmatch(var_name):
+                errors.append(
+                    f"{prefix}.prompt_vars 键必须是 [a-z][a-z0-9_]*: {var_name!r}")
+                continue
+            if var_name in BUILTIN_PROMPT_VARS:
+                errors.append(
+                    f"{prefix}.prompt_vars 不能覆盖内置占位符: {var_name}")
+                continue
+            if isinstance(var_value, bool) or not isinstance(
+                    var_value, (str, int, float)):
+                errors.append(
+                    f"{prefix}.prompt_vars.{var_name} 必须是字符串或数字")
+                continue
+            prompt_vars[var_name] = str(var_value)
+
         raw_output = conf.get("output") or {}
         if not isinstance(raw_output, dict):
             errors.append(f"{prefix}.output 必须是映射")
@@ -269,6 +295,7 @@ def load_tasks(settings: dict) -> dict[str, TaskSpec]:
             agent_timeout_seconds=agent_timeout,
             max_file_bytes=max_file_bytes,
             output=output,
+            prompt_vars=prompt_vars,
         )
 
     if errors:
