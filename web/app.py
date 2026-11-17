@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
 
@@ -84,6 +85,15 @@ def _save_upload(upload: UploadFile, dest: Path, max_bytes: int) -> int:
     return size
 
 
+def _cors_origins(settings: dict) -> list[str]:
+    """cors_origins 支持 "*"、逗号分隔字符串或列表；留空时回退为任意来源。"""
+    raw = (settings.get("server") or {}).get("cors_origins", "*")
+    items = raw.split(",") if isinstance(raw, str) else (
+        list(raw) if isinstance(raw, (list, tuple, set)) else [])
+    origins = [str(item).strip() for item in items if str(item).strip()]
+    return origins or ["*"]
+
+
 def create_app(settings: dict | None = None, runner_factory=None) -> FastAPI:
     settings = settings or load_config()
     tasks = load_tasks(settings)
@@ -112,6 +122,16 @@ def create_app(settings: dict | None = None, runner_factory=None) -> FastAPI:
             sync_pool.shutdown(wait=False, cancel_futures=True)
 
     app = FastAPI(title="Task Runner Service", version=VERSION, lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins(settings),
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        # 前端需要读取任务 id 与下载文件名，跨域时必须显式暴露。
+        expose_headers=["X-Task-Id", "Content-Disposition", "Location", "Retry-After"],
+        max_age=86400,
+    )
     app.state.settings = settings
     app.state.tasks = tasks
     app.state.worker = worker

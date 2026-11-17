@@ -88,6 +88,7 @@ class Worker:
             try:
                 update_task_status(task_id, "running", started_at=now_iso())
                 settings_for_task = dict(self.settings)
+                settings_for_task["task_id"] = task_id
                 settings_for_task["session_prefix"] = f"task-{task_id}"
                 runner = self.runner_factory(
                     settings_for_task, spec, workspace, dsh_home, input_files)

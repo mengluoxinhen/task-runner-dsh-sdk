@@ -24,6 +24,9 @@ server:
   host: 0.0.0.0
   port: 11443
   sync_max_waiters: 8                 # 同时阻塞等待结果的 sync 请求上限，超出直接 202
+  # 允许前端直连的来源：* 表示任意来源；多个来源用英文逗号分隔，或设 CORS_ORIGINS 覆盖。
+  # 服务不使用 Cookie/凭证，因此 * 与 allow_credentials=False 可以共存。
+  cors_origins: "${CORS_ORIGINS:*}"
 
 # ── Agent 执行 ─────────────────────────────────────────────────
 agent:

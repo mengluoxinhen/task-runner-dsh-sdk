@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import sqlite3
@@ -12,6 +13,7 @@ import tempfile
 import time
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -20,7 +22,8 @@ sys.path.insert(0, str(ROOT))
 
 from task_engine.config import load_config  # noqa: E402
 from task_engine.runner import RunOutcome, Runner, atomic_write_json  # noqa: E402
-from web.app import create_app  # noqa: E402
+from task_engine.tasks import load_tasks  # noqa: E402
+from web.app import _cors_origins, create_app  # noqa: E402
 from web.db import init_db  # noqa: E402
 
 TASKS_YAML = """
@@ -204,6 +207,29 @@ def test_api(tmp: Path):
         assert client.get("/health").json()["status"] == "ok"
         assert client.get("/").json()["task_types"]
 
+        # CORS：解析配置 + 预检 + 暴露任务头
+        assert _cors_origins({"server": {}}) == ["*"]
+        assert _cors_origins(
+            {"server": {"cors_origins": "http://a, http://b"}}
+        ) == ["http://a", "http://b"]
+        pre = client.options(
+            "/api/task-types",
+            headers={
+                "Origin": "http://frontend.local",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+        assert pre.status_code == 200, pre.text
+        assert pre.headers.get("access-control-allow-origin") in {
+            "*", "http://frontend.local"}, pre.headers
+        assert "content-type" in pre.headers.get(
+            "access-control-allow-headers", "").lower()
+        cors = client.get("/api/task-types", headers={"Origin": "http://frontend.local"})
+        assert cors.headers.get("access-control-allow-origin"), cors.headers
+        exposed = cors.headers.get("access-control-expose-headers", "").lower()
+        assert "x-task-id" in exposed and "content-disposition" in exposed, exposed
+
         # 任务级提示词变量：<<skill_name>> 等自定义占位符
         spec = app.state.tasks["ppt_extract"]
         assert spec.prompt_vars == {"skill_name": "demo-skill"}, spec.prompt_vars
@@ -341,6 +367,41 @@ def test_concurrency(tmp: Path):
     print("ok concurrency")
 
 
+def test_progress_log(tmp: Path):
+    settings = _prepare(tmp)
+    spec = load_tasks(settings)["ppt_extract"]
+    workspace = tmp / "ws"
+    runner = Runner(settings, spec, workspace, tmp / "dsh-home", ["a.pptx"])
+    callback = runner._notification_logger("t123")
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        callback(SimpleNamespace(method="session.status",
+                                 payload={"status": "running"}))
+        callback(SimpleNamespace(method="session.event", payload={
+            "sessionId": "task-t123",
+            "event": {
+                "type": "assistant/message",
+                "seq": 7,
+                "data": {"message": {"content": [
+                    {"type": "text", "text": "hello"}]}},
+            },
+        }))
+        callback(SimpleNamespace(method="other", payload={}))
+
+    output = buf.getvalue()
+    assert "status=running" in output, output
+    assert "assistant/message seq=7" in output, output
+    assert "hello" in output, output
+
+    log_file = workspace / "_artifacts" / "agent_events.jsonl"
+    lines = log_file.read_text("utf-8").splitlines()
+    assert len(lines) == 1, lines
+    event = json.loads(lines[0])
+    assert event["type"] == "assistant/message" and event["seq"] == 7
+    print("ok progress log")
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -349,6 +410,7 @@ def main():
         test_migration(migration_dir)
         test_api(root / "app")
         test_concurrency(root / "concurrency")
+        test_progress_log(root / "progress")
     print("ALL TESTS PASSED")
 
 

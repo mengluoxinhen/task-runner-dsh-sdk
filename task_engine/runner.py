@@ -94,7 +94,7 @@ class _HarnessRun:
         self.settings = settings
         self.timeout_seconds = timeout_seconds
 
-    def run(self, prompt: str, session_id: str):
+    def run(self, prompt: str, session_id: str, on_notification=None):
         harness = make_harness(self.settings)
         done = threading.Event()
         timed_out = threading.Event()
@@ -121,7 +121,8 @@ class _HarnessRun:
         timer.daemon = True
         timer.start()
         try:
-            result = harness.run(prompt, session_id=session_id)
+            result = harness.run(
+                prompt, session_id=session_id, on_notification=on_notification)
         except Exception as exc:
             if timed_out.is_set():
                 raise TaskRunError(
@@ -160,6 +161,45 @@ class Runner:
             **self.spec.prompt_vars,
         )
 
+    # ── 进度日志 ────────────────────────────────────────────────
+    def _notification_logger(self, task_id: str):
+        """把 SDK 通知打到服务日志，并将事件原样追加到 _artifacts/agent_events.jsonl。"""
+        log_path = self.workspace / "_artifacts" / "agent_events.jsonl"
+
+        def emit(message: str) -> None:
+            print(f"[agent {task_id}] {message}", flush=True)
+
+        def on_notification(notification) -> None:
+            try:
+                method = getattr(notification, "method", "")
+                payload = getattr(notification, "payload", {}) or {}
+                if method == "session.status":
+                    emit(f"status={payload.get('status')}")
+                    return
+                if method != "session.event":
+                    return
+                event = payload.get("event")
+                if not isinstance(event, dict):
+                    return
+                try:
+                    log_path.parent.mkdir(parents=True, exist_ok=True)
+                    with log_path.open("a", encoding="utf-8", newline="\n") as fh:
+                        fh.write(json.dumps(event, ensure_ascii=False) + "\n")
+                except OSError:
+                    pass
+                event_type = str(event.get("type") or "event")
+                seq = event.get("seq")
+                detail = json.dumps(event.get("data"), ensure_ascii=False)
+                if len(detail) > 1000:
+                    detail = detail[:1000] + "…"
+                prefix = f"{event_type}" + (f" seq={seq}" if seq is not None else "")
+                emit(f"{prefix} {detail}")
+            except Exception:
+                # 日志失败不能影响任务本身
+                pass
+
+        return on_notification
+
     # ── main ───────────────────────────────────────────────────
     def run(self) -> RunOutcome:
         self.workspace.mkdir(parents=True, exist_ok=True)
@@ -171,11 +211,15 @@ class Runner:
         session_id = self.settings.get("session_prefix") or f"task-{self.spec.id}"
 
         prompt = self.render_prompt()
+        task_id = str(self.settings.get("task_id") or self.workspace.name)
         print(f"[task] type={self.spec.id} workspace={self.workspace} session={session_id}",
               flush=True)
 
         result = _HarnessRun(harness_settings, self.spec.agent_timeout_seconds).run(
-            prompt, session_id)
+            prompt, session_id, on_notification=self._notification_logger(task_id))
+        print(f"[agent {task_id}] finished finish_reason="
+              f"{getattr(result, 'finish_reason', None)!r} "
+              f"events={len(getattr(result, 'events', []) or [])}", flush=True)
 
         final_response = result.final_response or ""
         if self.spec.output.kind == "json":

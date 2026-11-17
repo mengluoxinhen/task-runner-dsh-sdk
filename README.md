@@ -61,6 +61,8 @@ curl http://localhost:11443/health
 
 状态机：`pending → running → completed | failed`。
 
+浏览器前端可直接跨域调用：服务默认允许任意来源，并暴露 `X-Task-Id`、`Content-Disposition` 等响应头。需要限制来源时，改 `settings.yaml` 的 `server.cors_origins`（列表或逗号分隔字符串），或用环境变量 `CORS_ORIGINS=https://a.example,https://b.example` 覆盖。
+
 ## 结果合同
 
 **JSON 任务**：Agent 把最终 JSON 写入任务 workspace 的 `result.json`，服务端校验后原子写回（`result.json.tmp` → `os.replace`）。`result.json` 是唯一权威来源：
@@ -129,6 +131,7 @@ main.py           入口（单进程 workers=1）
 - 多个 worker 线程共享同一优先队列，同时执行最多 `agent.max_concurrency` 个任务（环境变量 `TASK_MAX_CONCURRENCY`，默认 2）；所有用户共享该并发池，超出的任务排队。`sync` 任务优先出队。Worker 必须单进程运行（queue/Event 在进程内），`main.py` 已固定 `workers=1`。
 - `sync` 等待超过任务配置的 `sync_timeout_seconds`（默认 300s）或并发等待名额已满时，返回 `202`，任务继续执行，可改轮询。
 - 每个任务独立 workspace + 独立 session（`task-{id}`），长任务不会污染其他任务。
+- Agent 运行过程会实时打印到服务日志（`[agent <task_id>] assistant/message ...`、工具事件、`session.status`），并原样追加到 `data/workspaces/<task_id>/_artifacts/agent_events.jsonl`；可 `tail -f` 跟踪，前端无需感知。
 - Agent 硬超时由 `agent.timeout_seconds` 控制（默认 900s），超时会强制关闭 harness，任务转 `failed`。
 - 沙箱权限档位由 `agent.permission_mode`（环境变量 `DSH_PERMISSION_MODE`）控制，默认 `danger-full-access`，以兼容打包 exe 内沙箱执行器无法启动的情况。该档位会关闭文件作用域限制和审批，Agent 可读写工作区外文件并读取项目内 `.env`，仅限受控内网部署；源码/收紧环境可设 `DSH_PERMISSION_MODE=workspace-write`。
 
