@@ -28,6 +28,8 @@ server:
 # ── Agent 执行 ─────────────────────────────────────────────────
 agent:
   timeout_seconds: 900                # 单任务硬超时（任务级可覆盖），超时强杀 harness
+  # 同时执行的 Agent 任务数（服务级，所有用户共享）；按 CPU/网关并发能力调整，建议 2–4。
+  max_concurrency: "${TASK_MAX_CONCURRENCY:2}"
   # DSH 权限预设：read-only | workspace-write | danger-full-access
   # 打包 exe 内沙箱执行器无法启动，默认用 danger-full-access 保证可运行；
   # 源码/受控环境想收紧时，设环境变量 DSH_PERMISSION_MODE=workspace-write 覆盖。

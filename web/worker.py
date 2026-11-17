@@ -14,9 +14,10 @@ from .waiter import TaskWaiters
 
 
 class Worker:
-    """单线程串行消费任务队列。
+    """固定并发数的任务执行池。
 
-    - sync 任务优先级更高（0），async 为 1；同优先级按提交顺序。
+    - 多个 worker 线程共享同一优先队列；sync 任务优先级更高（0），async 为 1，
+      同优先级按提交顺序。并发数由 agent.max_concurrency 控制。
     - 每个任务独立 workspace + 独立 session（task-{id}）。
     - 完成/失败后触发 waiter，sync 请求据此返回。
     """
@@ -30,16 +31,36 @@ class Worker:
         self.q: queue.PriorityQueue = queue.PriorityQueue()
         self.waiters = TaskWaiters()
         self._seq = itertools.count()
+        self._seq_lock = threading.Lock()
         self._stop = threading.Event()
-        self.thread = threading.Thread(target=self._loop, daemon=True, name="task-worker")
+        self._threads: list[threading.Thread] = []
+
+        raw = (settings.get("agent") or {}).get("max_concurrency", 1)
+        try:
+            self.concurrency = max(1, int(raw))
+        except (TypeError, ValueError):
+            self.concurrency = 1
+
+    def _next_seq(self) -> int:
+        with self._seq_lock:
+            return next(self._seq)
 
     def start(self):
-        if not self.thread.is_alive():
-            self.thread.start()
+        if any(t.is_alive() for t in self._threads):
+            return
+        self._threads = [
+            threading.Thread(target=self._loop, daemon=True,
+                             name=f"task-worker-{i}")
+            for i in range(self.concurrency)
+        ]
+        print(f"[worker] concurrency={self.concurrency}", flush=True)
+        for thread in self._threads:
+            thread.start()
 
     def stop(self):
         self._stop.set()
-        self.q.put((999, next(self._seq), None))
+        for _ in range(self.concurrency):
+            self.q.put((999, self._next_seq(), None))
 
     def submit(self, task_id: str, spec: TaskSpec, workspace: Path,
                dsh_home: Path, input_files: list[str]) -> threading.Event:
@@ -47,7 +68,7 @@ class Worker:
         priority = 0 if spec.delivery == "sync" else 1
         self.q.put((
             priority,
-            next(self._seq),
+            self._next_seq(),
             (task_id, spec, Path(workspace), Path(dsh_home), list(input_files)),
         ))
         return event

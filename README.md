@@ -109,7 +109,7 @@ tasks:
 ```
 config/           settings.yaml · tasks.yaml · prompts/*.md · gateway.patch.yml(模板)
 task_engine/      config.py(加载/渲染) · tasks.py(注册表) · llm.py(harness) · runner.py(执行/产物校验)
-web/              app.py(FastAPI) · worker.py(串行队列) · waiter.py(sync 等待) · db.py(sqlite)
+web/              app.py(FastAPI) · worker.py(并发队列) · waiter.py(sync 等待) · db.py(sqlite)
 tests/            test_api.py（FakeRunner，无 LLM）
 data/             运行时产物（gitignore）；test_docs/ 为示例文档；e2e_tasks.py 真实 e2e 脚本
 main.py           入口（单进程 workers=1）
@@ -117,7 +117,7 @@ main.py           入口（单进程 workers=1）
 
 ## 执行模型
 
-- 单线程串行消费队列；`sync` 任务优先出队。Worker 必须单进程运行（queue/Event 在进程内），`main.py` 已固定 `workers=1`。
+- 多个 worker 线程共享同一优先队列，同时执行最多 `agent.max_concurrency` 个任务（环境变量 `TASK_MAX_CONCURRENCY`，默认 2）；所有用户共享该并发池，超出的任务排队。`sync` 任务优先出队。Worker 必须单进程运行（queue/Event 在进程内），`main.py` 已固定 `workers=1`。
 - `sync` 等待超过任务配置的 `sync_timeout_seconds`（默认 300s）或并发等待名额已满时，返回 `202`，任务继续执行，可改轮询。
 - 每个任务独立 workspace + 独立 session（`task-{id}`），长任务不会污染其他任务。
 - Agent 硬超时由 `agent.timeout_seconds` 控制（默认 900s），超时会强制关闭 harness，任务转 `failed`。

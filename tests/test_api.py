@@ -73,6 +73,13 @@ tasks:
     max_files: 1
     prompt: small.md
     max_file_bytes: 10
+
+  concurrent_json:
+    name: 并发任务
+    accept: [".txt"]
+    min_files: 1
+    max_files: 1
+    prompt: concurrent.md
 """
 
 
@@ -88,6 +95,8 @@ class FakeRunner:
             raise RuntimeError("fake failure")
         if self.spec.id == "slow_json":
             time.sleep(2)
+        if self.spec.id == "concurrent_json":
+            time.sleep(1.5)
 
         if self.spec.output.kind == "json":
             data = {
@@ -120,7 +129,8 @@ def _prepare(tmp: Path):
     prompt_dir = cfg_dir / "prompts"
     prompt_dir.mkdir(parents=True)
     (cfg_dir / "tasks.yaml").write_text(TASKS_YAML, encoding="utf-8")
-    for name in ("ppt.md", "md.md", "slow.md", "fail.md", "small.md"):
+    for name in ("ppt.md", "md.md", "slow.md", "fail.md", "small.md",
+                 "concurrent.md"):
         (prompt_dir / name).write_text("fake prompt", encoding="utf-8")
 
     settings = load_config()
@@ -185,7 +195,8 @@ def test_api(tmp: Path):
         # 元数据
         meta = client.get("/api/task-types").json()["items"]
         assert {m["id"] for m in meta} == {
-            "ppt_extract", "doc_to_markdown", "slow_json", "fail_json", "small"}
+            "ppt_extract", "doc_to_markdown", "slow_json", "fail_json", "small",
+            "concurrent_json"}
         assert client.get("/health").json()["status"] == "ok"
         assert client.get("/").json()["task_types"]
 
@@ -289,6 +300,34 @@ def test_api(tmp: Path):
     print("ok api")
 
 
+def test_concurrency(tmp: Path):
+    settings = _prepare(tmp)
+    settings.setdefault("agent", {})["max_concurrency"] = 2
+    app = create_app(settings, runner_factory=FakeRunner)
+
+    with TestClient(app) as client:
+        r1 = _upload(client, "concurrent_json", [("a.txt", b"x")])
+        r2 = _upload(client, "concurrent_json", [("b.txt", b"x")])
+        assert r1.status_code == 202 and r2.status_code == 202, (r1.text, r2.text)
+        ids = [r1.json()["task_id"], r2.json()["task_id"]]
+
+        deadline = time.time() + 3
+        states: list[str] = []
+        while time.time() < deadline:
+            states = [client.get(f"/api/tasks/{i}").json()["status"] for i in ids]
+            if states.count("running") == 2:
+                break
+            if "completed" in states:
+                break
+            time.sleep(0.05)
+        assert states.count("running") == 2, states
+
+        for task_id in ids:
+            assert _wait(client, task_id)["status"] == "completed"
+
+    print("ok concurrency")
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -296,6 +335,7 @@ def main():
         migration_dir.mkdir()
         test_migration(migration_dir)
         test_api(root / "app")
+        test_concurrency(root / "concurrency")
     print("ALL TESTS PASSED")
 
 
